@@ -1,0 +1,101 @@
+---
+title: "Using Pricipal Component Regression to Predict WAR From 2018 MLB Data"
+author: "David Swets"
+date: "December 11, 2018"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+setwd("C:/Users/david/Desktop/Classes/Multivariate Data Mining/Posts/Post 3 - PCA Regression")
+
+```
+
+Since advanced stats have been all the rage in baseball since "Moneyball" first came out, let's attempt to determine the most significant predictor of WAR of American League position players using data from the 2018 season. In this era of advanced metrics, WAR (Wins Above Replacement) has become possibly the most influential statistic used to evaluate the overall value of an MLB player. This data comes from Baseball Reference (https://www.baseball-reference.com/leagues/AL/2018-standard-batting.shtml) and the file used for this analysis can also be found here on this GitHub page.  Because WAR is calculated slightly differently depending on the source, just to clarify, we will be using Baseball Reference's calculation of WAR for this analysis.  
+
+
+Let's start by loading in the required packages and reading in the two data sets. To get the WAR information, we'll need to read in this additional data set and join the two together; however, we'll only keep the "Name" and "WAR" columns from the second data set, as the rest of the columns are unnecessary or even potentially duplicates of data we already have.
+```{r}
+library(dplyr)
+library(QuantPsyc)
+
+AL <- read.delim("al_standard.txt", sep = ",")
+
+
+WAR <- read.delim("al_war.txt", sep = ",")
+
+# pulling just the Name and WAR columns
+WAR <- WAR[, c("Name", "WAR")]
+
+```
+
+Now, we want to join them together to get a WAR value for each player, and we'll also remove incomplete cases.
+```{r}
+
+full_AL <- inner_join(AL, WAR, by = "Name")
+
+# removing rows with NA's
+full_AL <- na.omit(full_AL)
+
+```
+
+
+Let's start by predicting WAR using a few traditional baseball stats. We can't use all of the variables we have because of the obvious problems we'd run into from including redundant variables such as OBP (On Base Percentage), SLG (Slugging Percentage), and OPS (which is equal to OBP + Slugging Pct), for example. Let's keep this one simple using some very straightforward predictors: Age, At-Bats, Runs, Hits, Home Runs, Runs Batted In, Stolen Bases, and Strike Outs.  
+```{r}
+AL_num <- full_AL[, unlist(lapply(full_AL, is.numeric))]
+
+
+m1 <- lm(WAR ~ Age + AB + R + H + HR + RBI + SB + SO, data = AL_num)
+summary(m1)
+
+# calculating RMSE
+sqrt(mean(residuals(m1)^2))
+
+# standardized betas
+lm.beta(m1)
+
+```
+We see from this analysis that At-Bats, Runs, Hits, Home Runs, and Stolen Bases are all significant predictors of WAR.   This model produces an R^2 of .8221 and an RMSE of .6458. Looking at the standardized betas, we see that At-Bats actually has the most significant impact on WAR, and a negative impact at that. We'll retain only the significant predictors for the next model.
+
+```{r}
+# keeping only the significant variables
+
+m2 <- lm(WAR ~ AB + R + H + HR + SB, data = AL_num)
+summary(m2)
+
+# calculating RMSE for m2
+sqrt(mean(residuals(m2)^2))
+
+
+```
+This cleaner model has an R^2 value of .8219 and an RMSE of .6462. Only slightly different than the model before and much more parsimonious!
+
+
+Now, let's calculate the first 2 principal components of all of our quantitative variables (except WAR, of course).  Once we have these values, we'll plug these into a new model as predictors and see how our model changes.
+```{r}
+
+al.pca <- prcomp(AL_num[,1:26], center = TRUE,scale. = TRUE)
+summary(al.pca)
+
+# keeping only the first 2 PCS
+pcs = data.frame("pc1" = al.pca$x[,1], "pc2" = al.pca$x[,2]) 
+
+al_pca_join <- data.frame(AL_num, pcs)
+
+
+```
+
+Now, let's build the model
+```{r}
+# model using 1st two principal components as predictors
+
+m3 <- lm(WAR ~ pc1 + pc2, data= al_pca_join)
+
+summary(m3)
+
+
+# calculating RMSE for m2
+sqrt(mean(residuals(m3)^2))
+
+```
+We can see here that our new R^2 value has dropped slightly to .5856 and the RMSE has increased to .9858. However, as we saw from the pca summary above, the first 2 principal components only explain about 70% of the variation in the overall data.  While this is actually quite a lot considering that that these 2 dimensions explain about 70% of what was explained in 26 dimensions, there's little reason to think that using just these two predictors would perform better than the model we built above.  Therefore, while typically very effective, in this case, using the first 2 principal components as predictors resulted in a slightly lesser performing model than the straightforward regression model produced above.
